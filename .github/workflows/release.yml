@@ -1,0 +1,38 @@
+# ROM-free Setup/Source Pack CI check for Klonoa2DreamChampTournamentRecomp.
+# Human-triggered only (workflow_dispatch); no push/pull_request trigger.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version label, e.g. 0.1.0-preview'
+        type: string
+        default: '0.1.0-preview'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-rom-free-tree:
+    name: Verify ROM-free source & submodules
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Assert no private ROM, BIOS, or generated C++ in tree
+        run: |
+          set -euo pipefail
+          if find . -maxdepth 3 \( -iname '*.gba' -o -iname '*.bin' -o -iname '*.sav' \) | grep -q .; then
+            echo "::error::Private ROM/BIOS/save asset detected in checkout."
+            exit 1
+          fi
+          if compgen -G 'src/gen/cart/*.cpp' >/dev/null || compgen -G 'src/gen/bios/*.cpp' >/dev/null; then
+            echo "::error::Generated C++ detected in src/gen/."
+            exit 1
+          fi
+          echo "Tree is ROM-free and ready for local player/developer generation."

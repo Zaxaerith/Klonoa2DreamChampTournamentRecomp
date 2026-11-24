@@ -1,0 +1,5 @@
+# Public cartridge hardware configuration. No ROM/BIOS paths or player data.
+[video]
+screen = "raw"
+view_width = 240
+resize_view = false

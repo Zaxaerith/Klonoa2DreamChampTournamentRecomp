@@ -1,0 +1,14 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Klonoa 2: Dream Champ Tournament",
+  "system": "GBA",
+  "type": "recomp",
+  "toolchain": "gbarecomp",
+  "status": "exploring",
+  "project": "Klonoa2DreamChampTournamentRecomp",
+  "original": {
+    "region": "USA",
+    "serial": "AN6E",
+    "sha1": "35c05676e65fd4c92220861662cd3709342f36e2"
+  }
+}

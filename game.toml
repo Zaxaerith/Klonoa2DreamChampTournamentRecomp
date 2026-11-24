@@ -1,0 +1,40 @@
+[game]
+name = "Klonoa 2: Dream Champ Tournament"
+short_name = "klonoa2_dct"
+
+[program]
+name = "Klonoa 2: Dream Champ Tournament (USA)"
+id = "AN6E"
+load_address = 0x08000000
+size = 0x00400000
+entry_pc = 0x08000000
+codegen_shards = 16
+static_resume_all = true
+
+[identity]
+sha1 = "35c05676e65fd4c92220861662cd3709342f36e2"
+
+[rom]
+path = "Klonoa 2 - Dream Champ Tournament (USA).gba"
+sha1 = "35c05676e65fd4c92220861662cd3709342f36e2"
+
+[bios]
+sha1 = "300c20df6731a33952ded8c436f7f186d25d3492"
+hle = false
+skip_intro = false
+
+[save]
+# Chip type ("EEPROM_V124" at 0x1D5618) is detected from the verified ROM;
+# capacity (4 Kbit vs 64 Kbit) is intentionally left unpinned until observed.
+path = "saves/klonoa2_dct_usa.sav"
+
+[runtime]
+window_title = "Klonoa2DreamChampTournamentRecomp"
+
+[video]
+screen = "raw"
+view_width = 240
+resize_view = false
+
+[audio]
+shadow = false
