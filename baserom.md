@@ -11,8 +11,7 @@
 | BIOS SHA-1 | `300c20df6731a33952ded8c436f7f186d25d3492` |
 
 Detected cartridge save signature: `EEPROM_V124` at file offset `0x1D5618`.
-EEPROM capacity (4 Kbit / 512 B vs 64 Kbit / 8 KiB) is left for runtime
-detection until verified by cold save/load testing.
+Cold-boot save/reload testing settled EEPROM as 4 Kbit (`512` bytes, 9-bit request).
 
 Both inputs must be supplied locally by the user. Neither ROM nor BIOS is
 committed or downloaded by this repository.

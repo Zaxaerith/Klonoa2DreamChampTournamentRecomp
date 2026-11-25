@@ -1,33 +1,45 @@
-# ROM-free Setup/Source Pack CI check for Klonoa2DreamChampTournamentRecomp.
-# Human-triggered only (workflow_dispatch); no push/pull_request trigger.
+# ROM-free Setup/Source Pack CI & Release workflow for Klonoa2DreamChampTournamentRecomp.
+# Human-triggered only (workflow_dispatch); no push or pull_request trigger.
 
 name: Release
 
 on:
   workflow_dispatch:
     inputs:
+      publish_release:
+        description: 'Tag this commit and publish a GitHub Release'
+        type: boolean
+        default: true
       version:
-        description: 'Release version label, e.g. 0.1.0-preview'
+        description: 'Release version label, e.g. 0.1.0-preview (empty = VERSION file)'
         type: string
-        default: '0.1.0-preview'
+        default: ''
 
 permissions:
   contents: read
 
+env:
+  ZIP_PREFIX: klonoa2-dct-setup-pack
+
 jobs:
-  verify-rom-free-tree:
-    name: Verify ROM-free source & submodules
+  preflight:
+    name: Preflight & ROM-free check
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      publish: ${{ steps.meta.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 1
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Assert no private ROM, BIOS, or generated C++ in tree
         run: |
           set -euo pipefail
-          if find . -maxdepth 3 \( -iname '*.gba' -o -iname '*.bin' -o -iname '*.sav' \) | grep -q .; then
+          if find . -maxdepth 4 \( -iname '*.gba' -o -iname '*.bin' -o -iname '*.sav' \) | grep -q .; then
             echo "::error::Private ROM/BIOS/save asset detected in checkout."
             exit 1
           fi
@@ -35,4 +47,145 @@ jobs:
             echo "::error::Generated C++ detected in src/gen/."
             exit 1
           fi
-          echo "Tree is ROM-free and ready for local player/developer generation."
+          grep -q 'WIN32_EXECUTABLE TRUE' CMakeLists.txt
+          echo "Tree verified ROM-free with WIN32_EXECUTABLE TRUE."
+
+      - name: Resolve version and tag
+        id: meta
+        env:
+          IN_VERSION: ${{ inputs.version }}
+          IN_PUBLISH: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          FILE_VER="$(tr -d '[:space:]' < VERSION)"
+          RAW="$(printf '%s' "${IN_VERSION}" | tr -d '[:space:]')"
+          VER="${RAW:-${FILE_VER}}"
+          VER="${VER#v}"
+          if [[ ! "${VER}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Invalid version '${VER}'"
+            exit 1
+          fi
+          TAG="v${VER}"
+          PUBLISH=true
+          [[ "${IN_PUBLISH}" == "false" ]] && PUBLISH=false
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "publish=${PUBLISH}" >> "$GITHUB_OUTPUT"
+
+  setup-pack:
+    name: Build & package ROM-free Windows Setup Pack
+    needs: preflight
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup MSYS2 MinGW64 toolchain and SDL2
+        uses: msys2/setup-msys2@v2
+        with:
+          msysystem: mingw64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-SDL2
+
+      - name: Validate PowerShell scripts AST
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem tools\*.ps1 | ForEach-Object {
+            $errors = $null; $tokens = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { throw "AST error in $($_.Name)" }
+          }
+
+      - name: Configure and compile ROM-free host launcher target
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          MINGW_ROOT_WIN="$(cygpath -m /mingw64)"
+          cmake -S . -B build-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGBARECOMP_MINGW_PREFIX_UNIX="${MINGW_ROOT_WIN}" \
+            -DSDL2_INCLUDE_DIR="${MINGW_ROOT_WIN}/include/SDL2" \
+            -DSDL2_LIBRARY="${MINGW_ROOT_WIN}/lib/libSDL2.dll.a" \
+            -DSDL2_DLL="${MINGW_ROOT_WIN}/bin/SDL2.dll"
+          cmake --build build-ci --target game_launcher_ui --parallel 4
+
+      - name: Package ROM-free Setup Pack ZIP
+        env:
+          VER: ${{ needs.preflight.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = "dist/${{ env.ZIP_PREFIX }}-v$VER-windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage, dist | Out-Null
+          $tracked = git ls-files --recurse-submodules
+          foreach ($rel in $tracked) {
+            if ($rel -match '\.(gba|bin|sav)$') { throw "Forbidden asset in Setup Pack: $rel" }
+            if (Test-Path -LiteralPath $rel -PathType Leaf) {
+              $dest = Join-Path $stage $rel
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+              Copy-Item -LiteralPath $rel -Destination $dest
+            }
+          }
+          $zip = "dist/${{ env.ZIP_PREFIX }}-v$VER-windows-x64.zip"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $zip)" | Set-Content -LiteralPath "dist/SHA256SUMS" -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_PREFIX }}-windows-x64
+          path: |
+            dist/${{ env.ZIP_PREFIX }}-*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Tag & Publish GitHub Release
+    needs: [preflight, setup-pack]
+    if: needs.preflight.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Git tag if missing
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            git tag -a "${TAG}" -m "Klonoa 2: Dream Champ Tournament Recomp ${TAG}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${TAG}"
+          fi
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: "Klonoa 2: Dream Champ Tournament Recomp ${{ needs.preflight.outputs.tag }}"
+          files: |
+            dist/${{ env.ZIP_PREFIX }}-*.zip
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          make_latest: true
