@@ -38,3 +38,16 @@ resize_view = false
 
 [audio]
 shadow = false
+
+# Dispatched via 0x0804E7FC across flag-selected sub-tables in [0x08154040, 0x08154240).
+# gba_recompile auto-detects the trailing 76 entries at 0x08154110; this entry
+# covers the preceding 52 contiguous abs32 Thumb handler pointers.
+[[jump_table]]
+addr = 0x08154040
+stride = 4
+count = 52
+format = "abs32"
+entries_mode = "auto"
+name = "state_handler_table_08154040"
+note = "52 abs32 Thumb handlers adjoining auto_jt 0x08154110 (count=76), dispatched via 0x0804E7FC"
+
